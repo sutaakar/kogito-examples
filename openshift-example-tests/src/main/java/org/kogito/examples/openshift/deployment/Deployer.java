@@ -17,6 +17,7 @@ package org.kogito.examples.openshift.deployment;
 
 import java.net.URL;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 import cz.xtf.builder.builders.BuildConfigBuilder;
 import cz.xtf.builder.builders.ImageStreamBuilder;
@@ -120,6 +121,7 @@ public class Deployer {
         String finalImageStreamTag = "1.0";
         String buildName = "kaas-runtime-build";
         String resultImageStreamName = "kaas-runtime";
+        String resultImageStreamTag = "latest";
 
         createInsecureImageStream(project, finalImageStreamName, finalImageStreamTag, s2iRuntimeImageTag);
         createEmptyImageStream(project, resultImageStreamName);
@@ -140,7 +142,7 @@ public class Deployer {
                                                                                                                               .withNewOutput()
                                                                                                                                   .withNewTo()
                                                                                                                                       .withKind("ImageStreamTag")
-                                                                                                                                      .withName(resultImageStreamName + ":latest")
+                                                                                                                                      .withName(resultImageStreamName + ":" + resultImageStreamTag)
                                                                                                                                   .endTo()
                                                                                                                               .endOutput()
                                                                                                                               .withNewSource()
@@ -163,6 +165,9 @@ public class Deployer {
         project.getMaster().createBuildConfig(runtimeConfig);
         project.getMaster().startBuild(buildName);
         project.getMaster().waiters().hasBuildCompleted(buildName).timeout(TimeUnit.MINUTES, 5L).waitFor();
+
+        waitForImageStreamTagAvailable(project, resultImageStreamName, resultImageStreamTag);
+
         return resultImageStreamName;
     }
 
@@ -179,12 +184,13 @@ public class Deployer {
     private static void createInsecureImageStream(Project project, String name, String tag, String externalImage) {
         ImageStream s2iImageStream = new ImageStreamBuilder(name).addTag(tag, externalImage, true).build();
         project.getMaster().createImageStream(s2iImageStream);
-        new SimpleWaiter(() -> isImageStreamTagAvailable(project, name, tag)).reason("Waiting for image to be loaded by OpenShift.").timeout(TimeUnit.MINUTES, 5).waitFor();
+        waitForImageStreamTagAvailable(project, name, tag);
     }
 
-    private static boolean isImageStreamTagAvailable(Project project, String imageStreamName, String imageStreamTag) {
-        return project.getMaster().getImageStream(imageStreamName).getStatus().getTags().stream()
-                                                                                        .anyMatch(s -> s.getTag().equals(imageStreamTag));
+    private static void waitForImageStreamTagAvailable(Project project, String imageStreamName, String imageStreamTag) {
+        BooleanSupplier isImageStreamTagAvailable = () -> project.getMaster().getImageStream(imageStreamName).getStatus().getTags().stream()
+                                                                 .anyMatch(s -> s.getTag().equals(imageStreamTag));
+        new SimpleWaiter(isImageStreamTagAvailable).reason("Waiting for image to be loaded by OpenShift.").timeout(TimeUnit.MINUTES, 5).waitFor();
     }
 
     /**
